@@ -1,5 +1,35 @@
 #!/usr/bin/env python3
 
+"""
+vaultenvmanager - Export Vault secrets as shell environment variables
+
+Usage:
+  ./main.py <auth_method> [options]
+
+Auth Methods:
+  userpass     Authenticate with username and password
+  token        Authenticate using a Vault token
+  approle      Authenticate using Vault AppRole
+
+Examples:
+  ./main.py method --token ... --kv-engine ... --kv-path ...
+
+Options:
+  --kv-engine         Name of the KV v2 engine
+  --kv-path           Path(s) inside the KV engine
+  --vault-addr        Vault address (default: http://127.0.0.1:8200)
+  --ca-cert           Custom CA cert
+  --no-verify         Disable TLS verification (insecure)
+  --env-token-var     Export Vault token to env var
+  --output            Output format: env, json, none
+  --output-file       Write output to a file
+  --identifier        Username (userpass) / RoleID (approle)
+  --secret            Password (userpass) / SecretID (approle)
+  --mfa-path          Multifactor Authentication path (userpass)
+  --mfa-code          Multifactor Authentication code (userpass)
+  --token             Hashicorp Vault Token (token)
+"""
+
 import argparse
 import os
 import getpass
@@ -11,25 +41,47 @@ import json
 # Argument parsing
 # -----------------------------------
 
+
 def parse_args():
     # Common arguments shared by all subcommands
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--vault-addr", default=os.getenv("VAULT_ADDR", "http://127.0.0.1:8200"),
-                        help="Address of the Vault server (default: VAULT_ADDR env var or localhost)")
-    common.add_argument("--env-token-var", help="Name of environment variable to set with the Vault token")
-    common.add_argument("--kv-engine", required=True,
-                        help="Mount point of the Vault KV v2 secrets engine (e.g., 'secret', 'kv_user_tristan')")
-    common.add_argument("--kv-path", action="append", required=True,
-                        help="KV v2 secret paths to fetch (can be repeated for multiple)")
-    common.add_argument("--output", choices=["env", "json", "none"],
-                        help="Output mode: env (shell assignments), json, or none" )
+    common.add_argument(
+        "--vault-addr",
+        default=os.getenv("VAULT_ADDR", "http://127.0.0.1:8200"),
+        help="Address of the Vault server (default: VAULT_ADDR env var or localhost)",
+    )
+    common.add_argument(
+        "--env-token-var",
+        help="Name of environment variable to set with the Vault token",
+    )
+    common.add_argument(
+        "--kv-engine",
+        required=True,
+        help="Mount point of the Vault KV v2 secrets engine (e.g., 'secret', 'kv_user_tristan')",
+    )
+    common.add_argument(
+        "--kv-path",
+        action="append",
+        required=True,
+        help="KV v2 secret paths to fetch (can be repeated for multiple)",
+    )
+    common.add_argument(
+        "--output",
+        choices=["env", "json", "none"],
+        help="Output mode: env (shell assignments), json, or none",
+    )
     common.add_argument("--output-file", help="File to write output to (optional)")
-    common.add_argument("--ca-cert", help="Path to custom CA certificate for TLS verification")
-    common.add_argument("--no-verify", action="store_true",
-                        help="Disable SSL verification (insecure!)")
+    common.add_argument(
+        "--ca-cert", help="Path to custom CA certificate for TLS verification"
+    )
+    common.add_argument(
+        "--no-verify", action="store_true", help="Disable SSL verification (insecure!)"
+    )
 
     # Main parser (does not include common, to avoid arg duplication)
-    parser = argparse.ArgumentParser(description="Pull secrets from Vault and set as env vars.")
+    parser = argparse.ArgumentParser(
+        description="Pull secrets from Vault and set as env vars."
+    )
     subparsers = parser.add_subparsers(dest="auth_method", required=True)
 
     # userpass auth method
@@ -41,7 +93,9 @@ def parse_args():
 
     # token auth method
     p_token = subparsers.add_parser("token", parents=[common])
-    p_token.add_argument("-t", "--token", help="Vault token")
+    p_token.add_argument(
+        "-t", "--token", default=os.getenv("VAULT_ADDR"), help="Vault token"
+    )
 
     # approle auth method
     p_approle = subparsers.add_parser("approle", parents=[common])
@@ -50,16 +104,16 @@ def parse_args():
 
     return parser.parse_args()
 
+
 # -----------------------------------
 # Vault client and auth methods
 # -----------------------------------
 
+
 def get_client(addr, ca_cert=None, verify=True):
     """Initialize Vault client with TLS options."""
-    return hvac.Client(
-        url=addr,
-        verify=verify if ca_cert is None else ca_cert
-    )
+    return hvac.Client(url=addr, verify=verify if ca_cert is None else ca_cert)
+
 
 def authenticate_userpass(client, username, password, mfa_path=None, mfa_code=None):
     """Authenticate using userpass (with optional MFA)."""
@@ -75,12 +129,14 @@ def authenticate_userpass(client, username, password, mfa_path=None, mfa_code=No
     result = client.auth.userpass.login(username=username, **login_payload)
     return result["auth"]["client_token"]
 
+
 def authenticate_token(client, token):
     """Authenticate using a Vault token directly."""
     client.token = token
     if not client.is_authenticated():
         raise Exception("Token authentication failed.")
     return token
+
 
 def authenticate_approle(client, role_id, secret_id):
     """Authenticate using AppRole credentials."""
@@ -92,9 +148,11 @@ def authenticate_approle(client, role_id, secret_id):
     result = client.auth.approle.login(role_id=role_id, secret_id=secret_id)
     return result["auth"]["client_token"]
 
+
 # -----------------------------------
 # Secret fetching and output
 # -----------------------------------
+
 
 def fetch_kv2_secrets(client, engine, secret_paths):
     """Fetch and merge key/value secrets from multiple KV v2 paths."""
@@ -104,16 +162,17 @@ def fetch_kv2_secrets(client, engine, secret_paths):
             secret = client.secrets.kv.v2.read_secret_version(
                 mount_point=engine,
                 path=path,
-                raise_on_deleted_version=True  # Avoid deprecation warnings
+                raise_on_deleted_version=True,  # Avoid deprecation warnings
             )
             merged_data.update(secret["data"]["data"])
         except Exception as e:
             print(f"Failed to read from '{engine}/{path}': {e}", file=sys.stderr)
     return merged_data
 
+
 def output_secrets(data, mode=None, filename=None):
     """Output secrets in different formats depending on mode."""
-    
+
     if mode == "json":
         # Output as JSON
         json_data = json.dumps(data, indent=2)
@@ -135,7 +194,9 @@ def output_secrets(data, mode=None, filename=None):
 
     elif mode is None:
         # Default: Single-line export-prefixed shell-safe format
-        export_line = "export " + " ".join(f"{key}='{value}'" for key, value in data.items())
+        export_line = "export " + " ".join(
+            f"{key}='{value}'" for key, value in data.items()
+        )
         if filename:
             with open(filename, "w") as f:
                 f.write(export_line + "\n")
@@ -149,18 +210,18 @@ def output_secrets(data, mode=None, filename=None):
         print(f"Unsupported output mode: {mode}", file=sys.stderr)
         sys.exit(1)
 
+
 # -----------------------------------
 # Main program flow
 # -----------------------------------
+
 
 def main():
     args = parse_args()
 
     # Initialize Vault client
     client = get_client(
-        args.vault_addr,
-        ca_cert=args.ca_cert,
-        verify=not args.no_verify
+        args.vault_addr, ca_cert=args.ca_cert, verify=not args.no_verify
     )
 
     # Authenticate based on the chosen method
@@ -171,7 +232,8 @@ def main():
                 args.identifier,
                 args.secret,
                 mfa_path=args.mfa_path,
-                mfa_code=args.mfa_code or (input("MFA code: ") if args.mfa_path else None)
+                mfa_code=args.mfa_code
+                or (input("MFA code: ") if args.mfa_path else None),
             )
         elif args.auth_method == "token":
             token = authenticate_token(client, args.token or input("Vault token: "))
@@ -197,6 +259,7 @@ def main():
 
     # Output the result
     output_secrets(secrets, args.output, args.output_file)
+
 
 # Entry point
 if __name__ == "__main__":
