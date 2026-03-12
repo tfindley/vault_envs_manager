@@ -3,7 +3,7 @@
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
-SCRIPT := main.py
+VEM := $(VENV)/bin/vem
 OUTPUT_FILE := test.env
 
 .PHONY: help run test format clean venv install
@@ -12,8 +12,8 @@ help:
 	@echo "VaultEnvManager Makefile Commands:"
 	@echo ""
 	@echo "  make venv        Set up a Python virtual environment"
-	@echo "  make install     Install required Python packages"
-	@echo "  make run         Run script interactively"
+	@echo "  make install     Install package in editable mode"
+	@echo "  make run         Run vem interactively"
 	@echo "  make test        Run and write output to $(OUTPUT_FILE)"
 	@echo "  make format      Auto-format Python code using black"
 	@echo "  make clean       Remove virtualenv and test output"
@@ -24,17 +24,17 @@ venv:
 	@test -d $(VENV) || python3 -m venv $(VENV)
 
 install: venv
-	@echo "Installing Python dependencies..."
+	@echo "Installing package in editable mode..."
 	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
+	$(PIP) install -e .
 
-run: $(SCRIPT)
+run: install
 	@echo "Running vaultenvmanager..."
-	$(PYTHON) $(SCRIPT)
+	$(VEM)
 
-test: $(SCRIPT)
+test: install
 	@echo "Writing env output to $(OUTPUT_FILE)..."
-	$(PYTHON) $(SCRIPT) \
+	$(VEM) \
 		token \
 		--vault-addr=http://127.0.0.1:8200 \
 		--kv-engine=kv_user_tristan \
@@ -51,4 +51,4 @@ format:
 
 clean:
 	@echo "Cleaning up..."
-	rm -rf $(VENV) $(OUTPUT_FILE) __pycache__ .pytest_cache
+	rm -rf $(VENV) $(OUTPUT_FILE) __pycache__ .pytest_cache *.egg-info
