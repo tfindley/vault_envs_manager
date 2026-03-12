@@ -68,53 +68,60 @@ eval $(vem userpass \
 
 You will be prompted for your password interactively. To pass it non-interactively, use `-s password`.
 
-## Command Options
+## Command Reference
 
-### Vault Address Options
+All options below are shared across every auth method. Run `vem <method> --help` for full details.
 
-| Flag         | Option | ENV Variable | Description                                                      |
-| ------------ | ------ | ------------ | ---------------------------------------------------------------- |
-| --vault-addr |        | VAULT_ADDR   | Address of the Vault server (default: `http://127.0.0.1:8200`)   |
-| --ca-cert    |        |              | Path to a custom CA certificate for TLS verification             |
-| --no-verify  |        |              | Disable TLS verification (insecure)                              |
+### Vault Connection
 
-### Common Options
+| Flag         | Short | Env Variable | Description                                                    |
+| ------------ | ----- | ------------ | -------------------------------------------------------------- |
+| --vault-addr |       | VAULT_ADDR   | Vault server address (default: `http://127.0.0.1:8200`)        |
+| --ca-cert    |       |              | Path to custom CA certificate for TLS verification             |
+| --no-verify  |       |              | Disable TLS certificate verification (insecure)                |
 
-| Flag            | Option | Description                                                     |
-| --------------- | ------ | --------------------------------------------------------------- |
-| --kv-engine     |        | Mount point of the KV v2 secrets engine (e.g., kv_user_tristan) |
-| --kv-path       |        | Secret path (can be passed multiple times for merging)          |
-| --env-token-var |        | Name of an env variable to export the Vault token into          |
-| --output        |        | Output format: env, json, none                                  |
-| --output-file   |        | Optional file to write the output                               |
+### Secrets
 
-### Token Authentication
+| Flag        | Short | Description                                                          |
+| ----------- | ----- | -------------------------------------------------------------------- |
+| --kv-engine |       | Mount point of the KV v2 secrets engine (e.g., `kv_user_tristan`)    |
+| --kv-path   |       | Secret path to fetch (can be repeated; later paths override earlier) |
 
-Run `vem token --help` for all options.
+### Output
 
-| Flag    | Option | ENV Variable | Description |
-| ------- | ------ | ------------ | ----------- |
-| --token | -t     | VAULT_TOKEN  | Token       |
+| Flag            | Short | Description                                                      |
+| --------------- | ----- | ---------------------------------------------------------------- |
+| --output        |       | Output format: `env`, `json`, `none` (default: export for eval)  |
+| --output-file   |       | Write output to a file instead of stdout                         |
+| --env-token-var |       | Include the Vault token in output as this variable name          |
+
+### Auth: Token
+
+Authenticate with an existing Vault token.
+
+| Flag    | Short | Env Variable | Description  |
+| ------- | ----- | ------------ | ------------ |
+| --token | -t    | VAULT_TOKEN  | Vault token  |
 
 ```bash
 vem token \
-  --token $VAULT_TOKEN \
+  -t $VAULT_TOKEN \
   --kv-engine kv_name \
   --kv-path testenv \
   --vault-addr https://vault.example.com:8200 \
   --ca-cert ~/certs/ca.pem
 ```
 
-### UserPass Authentication
+### Auth: UserPass
 
-Run `vem userpass --help` for all options.
+Authenticate with username and password (with optional MFA). If `-i` or `-s` are omitted, you will be prompted interactively.
 
-| Flag         | Option | Description                                |
-| ------------ | ------ | ------------------------------------------ |
-| --identifier | -i     | Username                                   |
-| --secret     | -s     | Password                                   |
-| --mfa-path   |        | Multifactor Authentication path (if used)  |
-| --mfa-code   |        | Multifactor Authentication code (if used)  |
+| Flag         | Short | Description                           |
+| ------------ | ----- | ------------------------------------- |
+| --identifier | -i    | Username                              |
+| --secret     | -s    | Password                              |
+| --mfa-path   |       | MFA method path (enables MFA)         |
+| --mfa-code   |       | MFA code (prompted if --mfa-path set) |
 
 ```bash
 vem userpass \
@@ -126,14 +133,14 @@ vem userpass \
   --ca-cert ~/certs/ca.pem
 ```
 
-### AppRole Authentication
+### Auth: AppRole
 
-Run `vem approle --help` for all options.
+Authenticate with AppRole credentials. If `-i` or `-s` are omitted, you will be prompted interactively.
 
-| Flag         | Option | Description      |
-| ------------ | ------ | ---------------- |
-| --identifier | -i     | RoleID           |
-| --secret     | -s     | Secret ID        |
+| Flag         | Short | Description        |
+| ------------ | ----- | ------------------ |
+| --identifier | -i    | AppRole role ID    |
+| --secret     | -s    | AppRole secret ID  |
 
 ```bash
 vem approle \

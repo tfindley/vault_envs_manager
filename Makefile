@@ -1,7 +1,6 @@
 # Makefile for vaultenvmanager
 
 VENV := .venv
-PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 VEM := $(VENV)/bin/vem
 OUTPUT_FILE := test.env

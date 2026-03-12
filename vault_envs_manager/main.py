@@ -1,34 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-vaultenvmanager - Export Vault secrets as shell environment variables
-
-Usage:
-  ./main.py <auth_method> [options]
-
-Auth Methods:
-  userpass     Authenticate with username and password
-  token        Authenticate using a Vault token
-  approle      Authenticate using Vault AppRole
-
-Examples:
-  ./main.py method --token ... --kv-engine ... --kv-path ...
-
-Options:
-  --kv-engine         Name of the KV v2 engine
-  --kv-path           Path(s) inside the KV engine
-  --vault-addr        Vault address (default: http://127.0.0.1:8200)
-  --ca-cert           Custom CA cert
-  --no-verify         Disable TLS verification (insecure)
-  --env-token-var     Export Vault token to env var
-  --output            Output format: env, json, none
-  --output-file       Write output to a file
-  --identifier        Username (userpass) / RoleID (approle)
-  --secret            Password (userpass) / SecretID (approle)
-  --mfa-path          Multifactor Authentication path (userpass)
-  --mfa-code          Multifactor Authentication code (userpass)
-  --token             Hashicorp Vault Token (token)
-"""
+"""VEM (Vault Envs Manager) - Pull secrets from HashiCorp Vault and export as environment variables."""
 
 import argparse
 import os
@@ -42,65 +14,122 @@ import json
 # -----------------------------------
 
 
-def parse_args():
-    # Common arguments shared by all subcommands
+def _build_common_parser():
+    """Build a parent parser with arguments shared by all auth methods."""
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
+
+    vault = common.add_argument_group("vault connection")
+    vault.add_argument(
         "--vault-addr",
         default=os.getenv("VAULT_ADDR", "http://127.0.0.1:8200"),
-        help="Address of the Vault server (default: VAULT_ADDR env var or localhost)",
+        help="Vault server address (env: VAULT_ADDR, default: http://127.0.0.1:8200)",
     )
-    common.add_argument(
-        "--env-token-var",
-        help="Name of environment variable to set with the Vault token",
+    vault.add_argument(
+        "--ca-cert",
+        help="path to custom CA certificate for TLS verification",
     )
-    common.add_argument(
+    vault.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="disable TLS certificate verification (insecure)",
+    )
+
+    secrets = common.add_argument_group("secrets")
+    secrets.add_argument(
         "--kv-engine",
         required=True,
-        help="Mount point of the Vault KV v2 secrets engine (e.g., 'secret', 'kv_user_tristan')",
+        help="mount point of the KV v2 secrets engine (e.g. 'kv_user_tristan')",
     )
-    common.add_argument(
+    secrets.add_argument(
         "--kv-path",
         action="append",
         required=True,
-        help="KV v2 secret paths to fetch (can be repeated for multiple)",
+        help="secret path to fetch (can be repeated; later paths override earlier ones)",
     )
-    common.add_argument(
+
+    output = common.add_argument_group("output")
+    output.add_argument(
         "--output",
         choices=["env", "json", "none"],
-        help="Output mode: env (shell assignments), json, or none",
+        help="output format (default: 'export KEY=VAL' for use with eval)",
     )
-    common.add_argument("--output-file", help="File to write output to (optional)")
-    common.add_argument(
-        "--ca-cert", help="Path to custom CA certificate for TLS verification"
+    output.add_argument(
+        "--output-file",
+        metavar="FILE",
+        help="write output to FILE instead of stdout",
     )
-    common.add_argument(
-        "--no-verify", action="store_true", help="Disable SSL verification (insecure!)"
+    output.add_argument(
+        "--env-token-var",
+        metavar="VAR",
+        help="include the Vault token in output as VAR",
     )
 
-    # Main parser (does not include common, to avoid arg duplication)
+    return common
+
+
+def parse_args():
+    common = _build_common_parser()
+
     parser = argparse.ArgumentParser(
-        description="Pull secrets from Vault and set as env vars."
+        prog="vem",
+        description="Pull secrets from HashiCorp Vault KV v2 and export as environment variables.",
+        epilog=(
+            "examples:\n"
+            "  vem userpass -i user --kv-engine kv_name --kv-path myapp\n"
+            "  vem token -t $VAULT_TOKEN --kv-engine kv_name --kv-path myapp --output json\n"
+            "  eval $(vem approle -i $ROLE_ID -s $SECRET_ID --kv-engine kv_name --kv-path myapp)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="auth_method", required=True)
-
-    # userpass auth method
-    p_userpass = subparsers.add_parser("userpass", parents=[common])
-    p_userpass.add_argument("-i", "--identifier", help="Username")
-    p_userpass.add_argument("-s", "--secret", help="Password")
-    p_userpass.add_argument("--mfa-path", help="Path to MFA method (if used)")
-    p_userpass.add_argument("--mfa-code", help="MFA code (if used)")
-
-    # token auth method
-    p_token = subparsers.add_parser("token", parents=[common])
-    p_token.add_argument(
-        "-t", "--token", default=os.getenv("VAULT_ADDR"), help="Vault token"
+    subparsers = parser.add_subparsers(
+        dest="auth_method",
+        required=True,
+        title="auth methods",
+        metavar="{userpass,token,approle}",
     )
 
-    # approle auth method
-    p_approle = subparsers.add_parser("approle", parents=[common])
-    p_approle.add_argument("-i", "--identifier", help="Role ID")
-    p_approle.add_argument("-s", "--secret", help="Secret ID")
+    # userpass
+    p_userpass = subparsers.add_parser(
+        "userpass",
+        parents=[common],
+        help="authenticate with username and password",
+        description="Authenticate to Vault using username/password (with optional MFA).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="if -i or -s are omitted, you will be prompted interactively.",
+    )
+    auth_up = p_userpass.add_argument_group("authentication")
+    auth_up.add_argument("-i", "--identifier", metavar="USER", help="username")
+    auth_up.add_argument("-s", "--secret", metavar="PASS", help="password")
+    auth_up.add_argument("--mfa-path", help="MFA method path (enables MFA)")
+    auth_up.add_argument("--mfa-code", help="MFA code (prompted if --mfa-path set)")
+
+    # token
+    p_token = subparsers.add_parser(
+        "token",
+        parents=[common],
+        help="authenticate with an existing Vault token",
+        description="Authenticate to Vault using a token directly.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    auth_tk = p_token.add_argument_group("authentication")
+    auth_tk.add_argument(
+        "-t", "--token",
+        default=os.getenv("VAULT_TOKEN"),
+        help="Vault token (env: VAULT_TOKEN)",
+    )
+
+    # approle
+    p_approle = subparsers.add_parser(
+        "approle",
+        parents=[common],
+        help="authenticate with AppRole (role ID + secret ID)",
+        description="Authenticate to Vault using AppRole credentials.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="if -i or -s are omitted, you will be prompted interactively.",
+    )
+    auth_ar = p_approle.add_argument_group("authentication")
+    auth_ar.add_argument("-i", "--identifier", metavar="ROLE_ID", help="AppRole role ID")
+    auth_ar.add_argument("-s", "--secret", metavar="SECRET_ID", help="AppRole secret ID")
 
     return parser.parse_args()
 
@@ -123,7 +152,9 @@ def authenticate_userpass(client, username, password, mfa_path=None, mfa_code=No
         password = getpass.getpass("Password: ")
 
     login_payload = {"password": password}
-    if mfa_path and mfa_code:
+    if mfa_path:
+        if not mfa_code:
+            mfa_code = input("MFA code: ")
         login_payload["mfa_code"] = mfa_code
 
     result = client.auth.userpass.login(username=username, **login_payload)
@@ -170,45 +201,32 @@ def fetch_kv2_secrets(client, engine, secret_paths):
     return merged_data
 
 
+def _emit(text, filename=None):
+    """Write text to a file or print to stdout."""
+    if filename:
+        with open(filename, "w") as f:
+            f.write(text + "\n")
+    else:
+        print(text)
+
+
 def output_secrets(data, mode=None, filename=None):
     """Output secrets in different formats depending on mode."""
 
     if mode == "json":
-        # Output as JSON
-        json_data = json.dumps(data, indent=2)
-        if filename:
-            with open(filename, "w") as f:
-                f.write(json_data + "\n")
-        else:
-            print(json_data)
+        _emit(json.dumps(data, indent=2), filename)
 
     elif mode == "env":
-        # Multi-line key='value' format (no 'export' prefix)
-        lines = [f"{key}='{value}'" for key, value in data.items()]
-        if filename:
-            with open(filename, "w") as f:
-                f.write("\n".join(lines) + "\n")
-        else:
-            for line in lines:
-                print(line)
+        _emit("\n".join(f"{key}='{value}'" for key, value in data.items()), filename)
 
     elif mode is None:
         # Default: Single-line export-prefixed shell-safe format
-        export_line = "export " + " ".join(
+        _emit("export " + " ".join(
             f"{key}='{value}'" for key, value in data.items()
-        )
-        if filename:
-            with open(filename, "w") as f:
-                f.write(export_line + "\n")
-        else:
-            print(export_line)
+        ), filename)
 
     elif mode == "none":
         pass
-
-    else:
-        print(f"Unsupported output mode: {mode}", file=sys.stderr)
-        sys.exit(1)
 
 
 # -----------------------------------
@@ -232,8 +250,7 @@ def main():
                 args.identifier,
                 args.secret,
                 mfa_path=args.mfa_path,
-                mfa_code=args.mfa_code
-                or (input("MFA code: ") if args.mfa_path else None),
+                mfa_code=args.mfa_code,
             )
         elif args.auth_method == "token":
             token = authenticate_token(client, args.token or input("Vault token: "))
@@ -248,14 +265,12 @@ def main():
     # Store the token in the client session
     client.token = token
 
-    # Optionally export the token itself to the environment
-    env_data = {}
-    if args.env_token_var:
-        env_data[args.env_token_var] = token
-
     # Fetch and merge all secrets from Vault
     secrets = fetch_kv2_secrets(client, args.kv_engine, args.kv_path)
-    secrets.update(env_data)
+
+    # Optionally include the token itself in the output
+    if args.env_token_var:
+        secrets[args.env_token_var] = token
 
     # Output the result
     output_secrets(secrets, args.output, args.output_file)
